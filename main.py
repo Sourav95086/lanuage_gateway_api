@@ -145,14 +145,41 @@ def translate_out(
 
 @app.post("/whatsapp/webhook")
 async def whatsapp_webhook(
-    Body: str = Form(...),
-    From: str = Form(...)
+
+    Body: str = Form(""),
+
+    From: str = Form(...),
+
+    NumMedia: int = Form(0),
+
+    MediaUrl0: str | None = Form(None),
+
+    MediaContentType0: str | None = Form(None)
+
 ):
+
     try:
 
+        print("\n================================")
+        print("TWILIO WEBHOOK RECEIVED")
+        print("================================")
+
+        print("From:", From)
+        print("Body:", Body)
+        print("NumMedia:", NumMedia)
+        print("MediaUrl0:", MediaUrl0)
+        print("MediaContentType0:", MediaContentType0)
+
         result = await process_whatsapp_message(
+
             message=Body,
-            user_id=From
+
+            user_id=From,
+
+            media_url=MediaUrl0,
+
+            media_content_type=MediaContentType0
+
         )
 
         twiml_response = MessagingResponse()
@@ -162,8 +189,11 @@ async def whatsapp_webhook(
         )
 
         return Response(
+
             content=str(twiml_response),
+
             media_type="application/xml"
+
         )
 
     except Exception as e:
@@ -174,6 +204,9 @@ async def whatsapp_webhook(
         )
 
         raise HTTPException(
+
             status_code=500,
+
             detail=str(e)
+
         )
