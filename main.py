@@ -7,6 +7,12 @@ from gateway.agent import (
     english_to_regional
 )
 
+from fastapi import Form
+from fastapi.responses import Response
+from twilio.twiml.messaging_response import MessagingResponse
+
+from gateway.whatsapp import process_whatsapp_message
+
 
 # ==================================================
 # FASTAPI
@@ -126,6 +132,46 @@ def translate_out(
         }
 
     except Exception as e:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
+
+# ==================================================
+# WHATSAPP WEBHOOK
+# ==================================================
+
+@app.post("/whatsapp/webhook")
+async def whatsapp_webhook(
+    Body: str = Form(...),
+    From: str = Form(...)
+):
+    try:
+
+        result = await process_whatsapp_message(
+            message=Body,
+            user_id=From
+        )
+
+        twiml_response = MessagingResponse()
+
+        twiml_response.message(
+            result["response"]
+        )
+
+        return Response(
+            content=str(twiml_response),
+            media_type="application/xml"
+        )
+
+    except Exception as e:
+
+        print(
+            "WHATSAPP WEBHOOK ERROR:",
+            str(e)
+        )
 
         raise HTTPException(
             status_code=500,

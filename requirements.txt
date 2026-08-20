@@ -1,7 +1,8 @@
 fastapi
-uvicorn[standard]
+uvicorn
 python-dotenv
-langchain-core
 langchain-groq
-groq
-pydantic
+langchain-core
+httpx
+twilio
+python-multipart
