@@ -8,6 +8,7 @@ from gateway.agent import (
 )
 
 
+
 BOT_API_URL = (
     "https://parakramuserreportchatbot-production.up.railway.app/chat"
 )
@@ -26,6 +27,21 @@ TWILIO_ACCOUNT_SID = os.getenv(
 
 TWILIO_AUTH_TOKEN = os.getenv(
     "TWILIO_AUTH_TOKEN"
+)
+
+print(
+    "Twilio SID loaded:",
+    bool(TWILIO_ACCOUNT_SID)
+)
+
+print(
+    "Twilio Auth Token loaded:",
+    bool(TWILIO_AUTH_TOKEN)
+)
+
+print(
+    "Twilio SID:",
+    TWILIO_ACCOUNT_SID
 )
 
 # ==================================================

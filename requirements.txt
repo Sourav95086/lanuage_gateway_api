@@ -6,3 +6,8 @@ langchain-core
 httpx
 twilio
 python-multipart
+python-telegram-bot
+python-dotenv
+httpx
+groq
+edge-tts
