@@ -85,7 +85,7 @@ TRANSLATE_OUT_URL = (
 # ==================================================
 
 PARAKRAM_BASE_URL = (
-    "https://parakramuserreportchatbot-production.up.railway.app"
+    "https://parakramuserreportchatbot-production-a5e6.up.railway.app"
 )
 
 
