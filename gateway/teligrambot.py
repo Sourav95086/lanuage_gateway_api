@@ -133,18 +133,134 @@ user_sessions = {}
 # ==================================================
 
 VOICE_MAP = {
-
+    # Common languages used by the bot. These are preferred voices;
+    # if a language is not listed here, the bot automatically searches
+    # Microsoft Edge TTS for a matching voice.
     "English": "en-IN-PrabhatNeural",
-
     "Hindi": "hi-IN-MadhurNeural",
-
     "Bengali": "bn-IN-BashkarNeural",
-
-    # Temporary fallback
-    "Odia": "en-IN-PrabhatNeural",
-
-    "Oriya": "en-IN-PrabhatNeural"
+    "Bangla": "bn-IN-BashkarNeural",
+    "Odia": "or-IN-SubhasiniNeural",
+    "Oriya": "or-IN-SubhasiniNeural",
+    "Tamil": "ta-IN-PallaviNeural",
+    "Telugu": "te-IN-ShrutiNeural",
+    "Kannada": "kn-IN-SapnaNeural",
+    "Malayalam": "ml-IN-SobhanaNeural",
+    "Marathi": "mr-IN-AarohiNeural",
+    "Gujarati": "gu-IN-DhwaniNeural",
+    "Punjabi": "pa-IN-OjasNeural",
+    "Urdu": "ur-IN-AsadNeural",
+    "Assamese": "as-IN-PriyomNeural",
+    "Nepali": "ne-NP-HemkalaNeural",
 }
+
+# Language aliases → locale prefixes. This lets the bot handle many
+# languages without maintaining a huge hard-coded voice table.
+LANGUAGE_LOCALE_MAP = {
+    "english": "en", "en": "en",
+    "hindi": "hi", "हिंदी": "hi", "hi": "hi",
+    "bengali": "bn", "bangla": "bn", "বাংলা": "bn", "bn": "bn",
+    "odia": "or", "oriya": "or", "ଓଡ଼ିଆ": "or", "or": "or",
+    "tamil": "ta", "தமிழ்": "ta", "ta": "ta",
+    "telugu": "te", "తెలుగు": "te", "te": "te",
+    "kannada": "kn", "ಕನ್ನಡ": "kn", "kn": "kn",
+    "malayalam": "ml", "മലയാളം": "ml", "ml": "ml",
+    "marathi": "mr", "मराठी": "mr", "mr": "mr",
+    "gujarati": "gu", "ગુજરાતી": "gu", "gu": "gu",
+    "punjabi": "pa", "ਪੰਜਾਬੀ": "pa", "pa": "pa",
+    "urdu": "ur", "اردو": "ur", "ur": "ur",
+    "nepali": "ne", "नेपाली": "ne", "ne": "ne",
+    "assamese": "as", "অসমীয়া": "as", "as": "as",
+    "french": "fr", "français": "fr", "fr": "fr",
+    "spanish": "es", "español": "es", "es": "es",
+    "german": "de", "deutsch": "de", "de": "de",
+    "italian": "it", "italiano": "it", "it": "it",
+    "portuguese": "pt", "português": "pt", "pt": "pt",
+    "russian": "ru", "русский": "ru", "ru": "ru",
+    "arabic": "ar", "العربية": "ar", "ar": "ar",
+    "chinese": "zh", "mandarin": "zh", "中文": "zh", "zh": "zh",
+    "japanese": "ja", "日本語": "ja", "ja": "ja",
+    "korean": "ko", "한국어": "ko", "ko": "ko",
+    "thai": "th", "ไทย": "th", "th": "th",
+    "vietnamese": "vi", "tiếng việt": "vi", "vi": "vi",
+    "turkish": "tr", "türkçe": "tr", "tr": "tr",
+    "dutch": "nl", "nederlands": "nl", "nl": "nl",
+    "polish": "pl", "polski": "pl", "pl": "pl",
+    "ukrainian": "uk", "українська": "uk", "uk": "uk",
+}
+
+# Cache the available Edge TTS voices after the first lookup.
+_EDGE_VOICES = None
+
+
+async def get_edge_voices():
+    """Load Microsoft Edge TTS voices once and cache them."""
+    global _EDGE_VOICES
+
+    if _EDGE_VOICES is None:
+        _EDGE_VOICES = await edge_tts.list_voices()
+
+    return _EDGE_VOICES
+
+
+async def get_voice_for_language(language: str) -> str:
+    """
+    Return a suitable Edge TTS voice for the requested language.
+
+    First use an explicit preferred voice. Otherwise search Edge TTS
+    dynamically by locale, so the bot can support languages beyond the
+    hard-coded list above.
+    """
+
+    if not language:
+        return "en-IN-PrabhatNeural"
+
+    # Exact preferred voice.
+    preferred = VOICE_MAP.get(language)
+    if preferred:
+        return preferred
+
+    normalized = str(language).strip().lower()
+    preferred = VOICE_MAP.get(normalized.title())
+    if preferred:
+        return preferred
+
+    locale_prefix = LANGUAGE_LOCALE_MAP.get(normalized)
+
+    # Sometimes the language gateway returns a locale such as en-US.
+    if not locale_prefix and "-" in normalized:
+        locale_prefix = normalized.split("-", 1)[0]
+
+    if not locale_prefix:
+        # Last attempt: compare against voice Locale/Language fields.
+        locale_prefix = normalized[:2]
+
+    voices = await get_edge_voices()
+
+    matches = []
+
+    for voice in voices:
+        locale = voice.get("Locale", "").lower()
+        short_name = voice.get("ShortName", "")
+
+        if locale.startswith(locale_prefix + "-"):
+            matches.append(voice)
+
+    if matches:
+        # Prefer a neural voice. Then prefer a common/default female or
+        # male voice without requiring a specific gender.
+        neural = [v for v in matches if "Neural" in v.get("ShortName", "")]
+        selected = neural[0] if neural else matches[0]
+        return selected["ShortName"]
+
+    # If Edge TTS does not expose the requested language, keep the bot
+    # operational instead of crashing.
+    print(
+        f"No Edge TTS voice found for language '{language}'. "
+        "Falling back to English."
+    )
+
+    return "en-IN-PrabhatNeural"
 
 
 # ==================================================
@@ -647,12 +763,19 @@ async def text_to_speech(
 
 ) -> str:
 
-    voice = VOICE_MAP.get(
+    # Dynamically select a voice for the detected response language.
+    # This removes the old English-only fallback for languages such as
+    # Odia and also allows additional Edge TTS languages automatically.
+    voice = await get_voice_for_language(language)
 
-        language,
+    print(
+        "TTS LANGUAGE:",
+        language
+    )
 
-        "en-IN-PrabhatNeural"
-
+    print(
+        "TTS VOICE:",
+        voice
     )
 
 
