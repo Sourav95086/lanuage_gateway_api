@@ -1,13 +1,10 @@
 
 import os
 import asyncio
-import tempfile
 
 import httpx
-import edge_tts
 
 from dotenv import load_dotenv
-from groq import Groq
 
 from telegram import Update
 from telegram.constants import ChatAction
@@ -43,24 +40,7 @@ if not TOKEN:
 
 
 # ==================================================
-# GROQ
-# ==================================================
-
-GROQ_API_KEY = os.getenv(
-    "GROQ_API_KEY"
-)
-
-if not GROQ_API_KEY:
-    raise ValueError(
-        "GROQ_API_KEY not found in .env"
-    )
-
-
-groq_client = Groq(
-    api_key=GROQ_API_KEY
-)
-
-
+# LANGUAGE GATEWAY
 # ==================================================
 # LANGUAGE GATEWAY
 # ==================================================
@@ -106,6 +86,19 @@ UPLOAD_VIDEO_URL = (
 
 
 # ==================================================
+# VOICE AGENT
+# ==================================================
+
+VOICE_AGENT_URL = os.getenv(
+    "VOICE_AGENT_URL",
+    "http://127.0.0.1:8000"
+).rstrip("/")
+
+VOICE_TRANSCRIBE_URL = f"{VOICE_AGENT_URL}/voice/transcribe"
+VOICE_SYNTHESIZE_URL = f"{VOICE_AGENT_URL}/voice/synthesize"
+
+
+# ==================================================
 # THREAD / SESSION MANAGEMENT
 # ==================================================
 
@@ -128,88 +121,7 @@ user_sessions = {}
 
 
 # ==================================================
-# LANGUAGE → TTS VOICE
-# ==================================================
-
-VOICE_MAP = {
-
-    "English": "en-IN-PrabhatNeural",
-
-    "Hindi": "hi-IN-MadhurNeural",
-
-    "Bengali": "bn-IN-BashkarNeural",
-
-    # Real Odia voice
-    "Odia": "or-IN-SwaraNeural",
-
-    # Alias
-    "Oriya": "or-IN-SwaraNeural"
-}
-
-
-# ==================================================
-# AUDIO LANGUAGE NORMALIZATION
-# ==================================================
-
-def normalize_audio_language(
-    language: str | None
-) -> str:
-
-    """
-    Normalize Whisper's detected language
-    into the language names used by the bot.
-
-    Supported languages:
-        English
-        Hindi
-        Bengali
-        Odia
-    """
-
-    if not language:
-        return "English"
-
-    language = language.strip().lower()
-
-    language_map = {
-
-        # ------------------------------------------
-        # ENGLISH
-        # ------------------------------------------
-
-        "english": "English",
-        "en": "English",
-
-        # ------------------------------------------
-        # HINDI
-        # ------------------------------------------
-
-        "hindi": "Hindi",
-        "hi": "Hindi",
-
-        # ------------------------------------------
-        # BENGALI
-        # ------------------------------------------
-
-        "bengali": "Bengali",
-        "bangla": "Bengali",
-        "bn": "Bengali",
-
-        # ------------------------------------------
-        # ODIA
-        # ------------------------------------------
-
-        "odia": "Odia",
-        "oriya": "Odia",
-        "or": "Odia"
-    }
-
-    return language_map.get(
-        language,
-        "English"
-    )
-
-
+# GET THREAD ID
 # ==================================================
 # GET THREAD ID
 # ==================================================
@@ -335,176 +247,79 @@ async def start(
 
 
 # ==================================================
-# SPEECH → TEXT
-# MULTILINGUAL WHISPER
-# ==================================================
-
-def transcribe_audio_sync(
-    file_path: str
-) -> tuple[str, str]:
-
-    """
-    Transcribe Telegram voice using Groq Whisper.
-
-    Whisper automatically detects the spoken language.
-
-    Supported:
-        English
-        Hindi
-        Bengali
-        Odia
-    """
-
-    with open(
-        file_path,
-        "rb"
-    ) as audio_file:
-
-        transcription = (
-
-            groq_client.audio.transcriptions.create(
-
-                file=audio_file,
-
-                model="whisper-large-v3-turbo",
-
-                # IMPORTANT:
-                # verbose_json gives us:
-                #
-                # transcription.text
-                # transcription.language
-                #
-                # We intentionally DO NOT provide
-                # a fixed language so Whisper can
-                # automatically detect the language.
-
-                response_format="verbose_json"
-
-            )
-
-        )
-
-
-    # ------------------------------------------
-    # GET TRANSCRIPTION
-    # ------------------------------------------
-
-    text = (
-
-        getattr(
-            transcription,
-            "text",
-            ""
-        )
-
-        or ""
-
-    ).strip()
-
-
-    # ------------------------------------------
-    # GET DETECTED LANGUAGE
-    # ------------------------------------------
-
-    detected_language = getattr(
-        transcription,
-        "language",
-        None
-    )
-
-
-    # ------------------------------------------
-    # NORMALIZE LANGUAGE
-    # ------------------------------------------
-
-    language = normalize_audio_language(
-        detected_language
-    )
-
-
-    return (
-        text,
-        language
-    )
-
-
-# ==================================================
-# ASYNC SPEECH → TEXT
+# VOICE AGENT → SPEECH TO TEXT
 # ==================================================
 
 async def speech_to_text(
-    file_bytes: bytes
+    file_bytes: bytes,
+    file_name: str = "telegram_voice.ogg"
 ) -> tuple[str, str]:
-
     """
-    Convert audio bytes into:
+    Send Telegram voice/audio bytes to the dedicated Voice Agent.
 
-        (
-            transcription,
-            detected_language
+    Returns:
+        (transcription, detected_language)
+    """
+
+    if not file_bytes:
+        raise Exception("Voice file is empty.")
+
+    files = {
+        "audio": (
+            file_name,
+            file_bytes,
+            "audio/ogg"
         )
-    """
+    }
 
-    temp_path = None
-
+    print("\n================================")
+    print("SENDING AUDIO TO VOICE AGENT")
+    print("================================")
+    print("URL:", VOICE_TRANSCRIBE_URL)
+    print("Filename:", file_name)
+    print("Size:", len(file_bytes), "bytes")
 
     try:
-
-        # ------------------------------------------
-        # CREATE TEMPORARY AUDIO FILE
-        # ------------------------------------------
-
-        with tempfile.NamedTemporaryFile(
-
-            suffix=".ogg",
-
-            delete=False
-
-        ) as temp_file:
-
-            temp_file.write(
-                file_bytes
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            response = await client.post(
+                VOICE_TRANSCRIBE_URL,
+                files=files
             )
 
-            temp_path = temp_file.name
+        print("VOICE AGENT STATUS:", response.status_code)
+        print("VOICE AGENT RESPONSE:", response.text)
 
+        response.raise_for_status()
+        result = response.json()
 
-        # ------------------------------------------
-        # GROQ SPEECH → TEXT
-        # ------------------------------------------
-
-        text, language = await asyncio.to_thread(
-
-            transcribe_audio_sync,
-
-            temp_path
-
-        )
-
-
-        return (
-            text,
-            language
-        )
-
-
-    finally:
-
-        # ------------------------------------------
-        # DELETE TEMP FILE
-        # ------------------------------------------
-
-        if (
-            temp_path
-            and os.path.exists(temp_path)
-        ):
-
-            os.remove(
-                temp_path
+        if not result.get("success"):
+            raise Exception(
+                result.get("detail", "Voice transcription failed.")
             )
+
+        text = (result.get("text") or "").strip()
+        language = result.get("language", "English")
+
+        if not text:
+            raise Exception("Voice Agent returned an empty transcription.")
+
+        return text, language
+
+    except httpx.RequestError as e:
+        raise Exception(
+            f"Could not connect to Voice Agent at {VOICE_AGENT_URL}: {e}"
+        )
+    except httpx.HTTPStatusError as e:
+        detail = e.response.text if e.response is not None else str(e)
+        raise Exception(
+            f"Voice Agent transcription failed: {detail}"
+        )
 
 
 # ==================================================
+# LANGUAGE GATEWAY
+# REGIONAL → ENGLISH
+# ==================================================# ==================================================
 # LANGUAGE GATEWAY
 # REGIONAL → ENGLISH
 # ==================================================
@@ -785,75 +600,68 @@ async def upload_video(
 
 
 # ==================================================
-# TEXT → SPEECH
-# MULTILINGUAL TTS
+# VOICE AGENT → TEXT TO SPEECH
 # ==================================================
 
 async def text_to_speech(
-
     text: str,
     language: str
-
 ) -> str:
+    """
+    Send text and language to the dedicated Voice Agent and
+    save the returned MP3 locally so Telegram can send it.
+    """
 
-    voice = VOICE_MAP.get(
+    if not text or not text.strip():
+        raise Exception("TTS text cannot be empty.")
 
-        language,
+    data = {
+        "text": text,
+        "language": language
+    }
 
-        "en-IN-PrabhatNeural"
+    print("\n================================")
+    print("SENDING TEXT TO VOICE AGENT")
+    print("================================")
+    print("URL:", VOICE_SYNTHESIZE_URL)
+    print("Language:", language)
 
-    )
+    try:
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            response = await client.post(
+                VOICE_SYNTHESIZE_URL,
+                data=data
+            )
 
+        print("VOICE TTS STATUS:", response.status_code)
 
-    print(
-        "\nTTS LANGUAGE:"
-    )
+        response.raise_for_status()
 
-    print(
-        language
-    )
+        if not response.content:
+            raise Exception("Voice Agent returned empty audio.")
 
+        with open(
+            "telegram_voice_response.mp3",
+            "wb"
+        ) as audio_file:
+            audio_file.write(response.content)
 
-    print(
-        "\nTTS VOICE:"
-    )
+        return os.path.abspath("telegram_voice_response.mp3")
 
-    print(
-        voice
-    )
-
-
-    with tempfile.NamedTemporaryFile(
-
-        suffix=".mp3",
-
-        delete=False
-
-    ) as temp_file:
-
-        temp_path = temp_file.name
-
-
-    communicate = edge_tts.Communicate(
-
-        text=text,
-
-        voice=voice
-
-    )
-
-
-    await communicate.save(
-
-        temp_path
-
-    )
-
-
-    return temp_path
+    except httpx.RequestError as e:
+        raise Exception(
+            f"Could not connect to Voice Agent at {VOICE_AGENT_URL}: {e}"
+        )
+    except httpx.HTTPStatusError as e:
+        detail = e.response.text if e.response is not None else str(e)
+        raise Exception(
+            f"Voice Agent TTS failed: {detail}"
+        )
 
 
 # ==================================================
+# COMPLETE MESSAGE PIPELINE
+# ==================================================# ==================================================
 # COMPLETE MESSAGE PIPELINE
 # ==================================================
 
@@ -1688,7 +1496,8 @@ async def handle_voice(
 
             await speech_to_text(
 
-                bytes(file_bytes)
+                bytes(file_bytes),
+                "telegram_voice.ogg"
 
             )
 
