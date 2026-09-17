@@ -1,3 +1,4 @@
+
 import os
 import asyncio
 import tempfile
@@ -116,8 +117,6 @@ MAX_MESSAGES_PER_THREAD = 35
 
 # Temporary in-memory storage
 #
-# Example:
-#
 # {
 #     6626297081: {
 #         "session": 1,
@@ -140,11 +139,75 @@ VOICE_MAP = {
 
     "Bengali": "bn-IN-BashkarNeural",
 
-    # Temporary fallback
-    "Odia": "en-IN-PrabhatNeural",
+    # Real Odia voice
+    "Odia": "or-IN-SwaraNeural",
 
-    "Oriya": "en-IN-PrabhatNeural"
+    # Alias
+    "Oriya": "or-IN-SwaraNeural"
 }
+
+
+# ==================================================
+# AUDIO LANGUAGE NORMALIZATION
+# ==================================================
+
+def normalize_audio_language(
+    language: str | None
+) -> str:
+
+    """
+    Normalize Whisper's detected language
+    into the language names used by the bot.
+
+    Supported languages:
+        English
+        Hindi
+        Bengali
+        Odia
+    """
+
+    if not language:
+        return "English"
+
+    language = language.strip().lower()
+
+    language_map = {
+
+        # ------------------------------------------
+        # ENGLISH
+        # ------------------------------------------
+
+        "english": "English",
+        "en": "English",
+
+        # ------------------------------------------
+        # HINDI
+        # ------------------------------------------
+
+        "hindi": "Hindi",
+        "hi": "Hindi",
+
+        # ------------------------------------------
+        # BENGALI
+        # ------------------------------------------
+
+        "bengali": "Bengali",
+        "bangla": "Bengali",
+        "bn": "Bengali",
+
+        # ------------------------------------------
+        # ODIA
+        # ------------------------------------------
+
+        "odia": "Odia",
+        "oriya": "Odia",
+        "or": "Odia"
+    }
+
+    return language_map.get(
+        language,
+        "English"
+    )
 
 
 # ==================================================
@@ -260,6 +323,12 @@ async def start(
         "• Video\n"
         "• Voice message\n\n"
 
+        "Voice messages can be in:\n"
+        "• English\n"
+        "• Hindi\n"
+        "• Bengali\n"
+        "• Odia\n\n"
+
         "Tell me about any civic issue you are facing."
 
     )
@@ -267,11 +336,24 @@ async def start(
 
 # ==================================================
 # SPEECH → TEXT
+# MULTILINGUAL WHISPER
 # ==================================================
 
 def transcribe_audio_sync(
     file_path: str
-) -> str:
+) -> tuple[str, str]:
+
+    """
+    Transcribe Telegram voice using Groq Whisper.
+
+    Whisper automatically detects the spoken language.
+
+    Supported:
+        English
+        Hindi
+        Bengali
+        Odia
+    """
 
     with open(
         file_path,
@@ -286,19 +368,82 @@ def transcribe_audio_sync(
 
                 model="whisper-large-v3-turbo",
 
-                response_format="json"
+                # IMPORTANT:
+                # verbose_json gives us:
+                #
+                # transcription.text
+                # transcription.language
+                #
+                # We intentionally DO NOT provide
+                # a fixed language so Whisper can
+                # automatically detect the language.
+
+                response_format="verbose_json"
 
             )
 
         )
 
 
-    return transcription.text.strip()
+    # ------------------------------------------
+    # GET TRANSCRIPTION
+    # ------------------------------------------
 
+    text = (
+
+        getattr(
+            transcription,
+            "text",
+            ""
+        )
+
+        or ""
+
+    ).strip()
+
+
+    # ------------------------------------------
+    # GET DETECTED LANGUAGE
+    # ------------------------------------------
+
+    detected_language = getattr(
+        transcription,
+        "language",
+        None
+    )
+
+
+    # ------------------------------------------
+    # NORMALIZE LANGUAGE
+    # ------------------------------------------
+
+    language = normalize_audio_language(
+        detected_language
+    )
+
+
+    return (
+        text,
+        language
+    )
+
+
+# ==================================================
+# ASYNC SPEECH → TEXT
+# ==================================================
 
 async def speech_to_text(
     file_bytes: bytes
-) -> str:
+) -> tuple[str, str]:
+
+    """
+    Convert audio bytes into:
+
+        (
+            transcription,
+            detected_language
+        )
+    """
 
     temp_path = None
 
@@ -328,7 +473,7 @@ async def speech_to_text(
         # GROQ SPEECH → TEXT
         # ------------------------------------------
 
-        text = await asyncio.to_thread(
+        text, language = await asyncio.to_thread(
 
             transcribe_audio_sync,
 
@@ -337,7 +482,10 @@ async def speech_to_text(
         )
 
 
-        return text
+        return (
+            text,
+            language
+        )
 
 
     finally:
@@ -390,10 +538,10 @@ async def translate_to_english(
         )
 
 
-        response.raise_for_status()
+    response.raise_for_status()
 
 
-        return response.json()
+    return response.json()
 
 
 # ==================================================
@@ -433,10 +581,10 @@ async def translate_to_regional(
         )
 
 
-        response.raise_for_status()
+    response.raise_for_status()
 
 
-        return response.json()
+    return response.json()
 
 
 # ==================================================
@@ -498,40 +646,40 @@ async def send_to_parakram(
             )
 
 
-            print("\n================================")
-            print("PARAKRAM RESPONSE")
-            print("================================")
+        print("\n================================")
+        print("PARAKRAM RESPONSE")
+        print("================================")
 
-            print("STATUS CODE:")
+        print("STATUS CODE:")
 
-            print(
-                response.status_code
+        print(
+            response.status_code
+        )
+
+
+        print("\nRESPONSE BODY:")
+
+        print(
+            response.text
+        )
+
+
+        if response.status_code >= 400:
+
+            raise Exception(
+
+                f"Parakram API failed\n"
+
+                f"Status: "
+                f"{response.status_code}\n"
+
+                f"Response: "
+                f"{response.text}"
+
             )
 
 
-            print("\nRESPONSE BODY:")
-
-            print(
-                response.text
-            )
-
-
-            if response.status_code >= 400:
-
-                raise Exception(
-
-                    f"Parakram API failed\n"
-
-                    f"Status: "
-                    f"{response.status_code}\n"
-
-                    f"Response: "
-                    f"{response.text}"
-
-                )
-
-
-            return response.json()
+        return response.json()
 
 
     except httpx.RequestError as e:
@@ -584,10 +732,10 @@ async def upload_image(
         )
 
 
-        response.raise_for_status()
+    response.raise_for_status()
 
 
-        return response.json()
+    return response.json()
 
 
 # ==================================================
@@ -630,14 +778,15 @@ async def upload_video(
         )
 
 
-        response.raise_for_status()
+    response.raise_for_status()
 
 
-        return response.json()
+    return response.json()
 
 
 # ==================================================
 # TEXT → SPEECH
+# MULTILINGUAL TTS
 # ==================================================
 
 async def text_to_speech(
@@ -653,6 +802,24 @@ async def text_to_speech(
 
         "en-IN-PrabhatNeural"
 
+    )
+
+
+    print(
+        "\nTTS LANGUAGE:"
+    )
+
+    print(
+        language
+    )
+
+
+    print(
+        "\nTTS VOICE:"
+    )
+
+    print(
+        voice
     )
 
 
@@ -950,6 +1117,7 @@ async def handle_text(
             thread_id
         )
 
+
         print(
             "Message:",
             message
@@ -1047,6 +1215,7 @@ async def handle_image(
             thread_id
         )
 
+
         print(
             "Caption:",
             message
@@ -1138,6 +1307,7 @@ async def handle_image(
         print(
             "IMAGE URL:"
         )
+
 
         print(
             image_url
@@ -1256,6 +1426,7 @@ async def handle_video(
             thread_id
         )
 
+
         print(
             "Caption:",
             message
@@ -1359,6 +1530,7 @@ async def handle_video(
             "VIDEO URL:"
         )
 
+
         print(
             video_url
         )
@@ -1461,10 +1633,12 @@ async def handle_voice(
         print("VOICE MESSAGE RECEIVED")
         print("================================")
 
+
         print(
             "Thread ID:",
             thread_id
         )
+
 
         print(
             "Duration:",
@@ -1510,7 +1684,7 @@ async def handle_voice(
         )
 
 
-        original_text = (
+        original_text, detected_audio_language = (
 
             await speech_to_text(
 
@@ -1521,14 +1695,44 @@ async def handle_voice(
         )
 
 
+        # ------------------------------------------
+        # PRINT DETECTED LANGUAGE
+        # ------------------------------------------
+
+        print(
+            "\n================================"
+        )
+
+        print(
+            "VOICE LANGUAGE DETECTED:"
+        )
+
+        print(
+            detected_audio_language
+        )
+
+        print(
+            "================================"
+        )
+
+
+        # ------------------------------------------
+        # PRINT TRANSCRIPTION
+        # ------------------------------------------
+
         print(
             "\nVOICE TRANSCRIPTION:"
         )
+
 
         print(
             original_text
         )
 
+
+        # ------------------------------------------
+        # EMPTY TRANSCRIPTION CHECK
+        # ------------------------------------------
 
         if (
 
@@ -1638,6 +1842,7 @@ async def handle_voice(
         print(
             "\nVOICE PROCESSING ERROR:\n"
         )
+
 
         print(
             str(e)
@@ -1794,3 +1999,4 @@ def main():
 if __name__ == "__main__":
 
     main()
+
